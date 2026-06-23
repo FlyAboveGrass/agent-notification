@@ -1,0 +1,28 @@
+  {
+    "hooks": {
+      "PermissionRequest": [
+        {
+          "hooks": [
+            {
+              "type": "command",
+              "command": "~/.codex/hooks/codex-stop-notify.sh",
+              "timeout": 10,
+              "statusMessage": "Sending Codex approval notification"
+            }
+          ]
+        }
+      ],
+      "Stop": [
+        {
+          "hooks": [
+            {
+              "type": "command",
+              "command": "~/.codex/hooks/codex-stop-notify.sh",
+              "timeout": 10,
+              "statusMessage": "Sending Codex completion notification"
+            }
+          ]
+        }
+      ]
+    }
+  }
