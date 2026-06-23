@@ -198,7 +198,7 @@ else
   AFPLAY_STATUS=127
   AFPLAY_OUTPUT=""
   if [ "${SOUND_FILE:-}" != "none" ] && [ -f "$SOUND_FILE" ]; then
-    AFPLAY_OUTPUT="$(/usr/bin/afplay "$SOUND_FILE" 2>&1)"
+    AFPLAY_OUTPUT="$(/usr/bin/afplay "$SOUND_FILE" & 2>&1)"
     AFPLAY_STATUS=$?
   elif [ "${SOUND_FILE:-}" = "none" ]; then
     AFPLAY_STATUS=0

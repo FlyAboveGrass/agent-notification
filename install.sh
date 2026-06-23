@@ -58,7 +58,7 @@ HOOK_COMMAND="$HOOK_COMMAND" HOOKS_JSON="$HOOKS_JSON" /usr/bin/ruby -rjson -e '
 '
 
 if [ "${CODEX_NOTIFIER_INSTALL_SKIP_TEST:-0}" != "1" ]; then
-  printf '{"hook_event_name":"Stop","session_id":"install-test","cwd":"%s","last_assistant_message":"Codex notifier installed successfully."}' "$PWD" | "$HOOK_COMMAND" >/dev/null
+  CODEX_NOTIFIER_DRY_RUN=1 printf '{"hook_event_name":"Stop","session_id":"install-test","cwd":"%s","last_assistant_message":"Codex notifier installed successfully."}' "$PWD" | CODEX_NOTIFIER_DRY_RUN=1 "$HOOK_COMMAND" >/dev/null
 fi
 
 cat <<EOF
