@@ -22,6 +22,7 @@ else
   SOUND_FILE="$LEGACY_SOUND"
 fi
 TERMINAL_NOTIFIER="${CODEX_NOTIFIER_TERMINAL_NOTIFIER:-}"
+AFPLAY_BIN="${CODEX_NOTIFIER_AFPLAY:-/usr/bin/afplay}"
 SENDER_BUNDLE="${CODEX_NOTIFIER_SENDER_BUNDLE:-com.openai.codex}"
 ICON_PATH="${CODEX_NOTIFIER_ICON:-}"
 CHANNEL_TIMEOUT_SECONDS="${CODEX_NOTIFIER_CHANNEL_TIMEOUT_SECONDS:-3}"
@@ -143,33 +144,56 @@ run_with_timeout() {
 }
 
 DISPATCH_DETACHED_PID=""
-dispatch_detached_with_watchdog() {
+dispatch_notifier_with_sound() {
   local watchdog_seconds="$1"
+  local sound_file="$2"
+  shift
   shift
 
-  DISPATCH_DETACHED_PID="$(/usr/bin/ruby -e '
+  DISPATCH_DETACHED_PID="$(/usr/bin/ruby -rtimeout -e '
     watchdog_seconds = Integer(ARGV.shift)
+    sound_file = ARGV.shift
     command = ARGV
-    pid = Process.spawn(*command, out: "/dev/null", err: "/dev/null", pgroup: true)
 
-    if watchdog_seconds > 0
-      Process.spawn(
-        "/bin/sh",
-        "-c",
-        "sleep \"$1\"; kill -TERM -\"$2\" 2>/dev/null; sleep 0.2; kill -KILL -\"$2\" 2>/dev/null",
-        "codex-notifier-watchdog",
-        watchdog_seconds.to_s,
-        pid.to_s,
-        out: "/dev/null",
-        err: "/dev/null"
-      )
+    worker = fork do
+      notifier_pid = Process.spawn(*command, out: "/dev/null", err: "/dev/null", pgroup: true)
+      completed = false
+
+      begin
+        if watchdog_seconds > 0
+          Timeout.timeout(watchdog_seconds) { Process.wait(notifier_pid) }
+        else
+          Process.wait(notifier_pid)
+        end
+        completed = true
+      rescue Timeout::Error
+        begin
+          Process.kill("TERM", -notifier_pid)
+        rescue Errno::ESRCH, Errno::EPERM
+        end
+        sleep 0.2
+        begin
+          Process.kill("KILL", -notifier_pid)
+        rescue Errno::ESRCH, Errno::EPERM
+        end
+        begin
+          Process.wait(notifier_pid)
+        rescue Errno::ECHILD
+        end
+      end
+
+      if completed && sound_file != "none" && File.file?(sound_file)
+        afplay_bin = ENV.fetch("CODEX_NOTIFIER_AFPLAY", "/usr/bin/afplay")
+        Process.spawn(afplay_bin, sound_file, out: "/dev/null", err: "/dev/null")
+      end
     end
 
-    print pid
-  ' "$watchdog_seconds" "$@" 2>/dev/null)"
+    Process.detach(worker)
+    print worker
+  ' "$watchdog_seconds" "$sound_file" "$@" 2>/dev/null)"
 }
 
-play_sound() {
+prepare_sound_status() {
   AFPLAY_STATUS=127
   AFPLAY_OUTPUT=""
 
@@ -185,9 +209,16 @@ play_sound() {
     return
   fi
 
-  /usr/bin/afplay "$SOUND_FILE" >/dev/null 2>&1 &
   AFPLAY_STATUS=0
-  AFPLAY_OUTPUT="dispatched pid=$!"
+  AFPLAY_OUTPUT="queued after terminal-notifier"
+}
+
+play_sound_now() {
+  prepare_sound_status
+  if [ "$AFPLAY_STATUS" = "0" ] && [ "${SOUND_FILE:-}" != "none" ] && [ -f "${SOUND_FILE:-}" ]; then
+    "$AFPLAY_BIN" "$SOUND_FILE" >/dev/null 2>&1 &
+    AFPLAY_OUTPUT="dispatched pid=$!"
+  fi
 }
 
 parse_payload() {
@@ -307,7 +338,8 @@ else
     if [ -n "$ICON_PATH" ] && [ -f "$ICON_PATH" ]; then
       NOTIFIER_ARGS+=(-appIcon "file://$ICON_PATH")
     fi
-    if dispatch_detached_with_watchdog "$TERMINAL_NOTIFIER_WATCHDOG_SECONDS" "$NOTIFIER_BIN" "${NOTIFIER_ARGS[@]}"; then
+    prepare_sound_status
+    if dispatch_notifier_with_sound "$TERMINAL_NOTIFIER_WATCHDOG_SECONDS" "$SOUND_FILE" "$NOTIFIER_BIN" "${NOTIFIER_ARGS[@]}"; then
       TERMINAL_NOTIFIER_STATUS=0
       TERMINAL_NOTIFIER_OUTPUT="dispatched pid=$DISPATCH_DETACHED_PID watchdog=${TERMINAL_NOTIFIER_WATCHDOG_SECONDS}s"
     else
@@ -326,9 +358,12 @@ else
       "$MESSAGE" "$TITLE" "$SUBTITLE"
     OSASCRIPT_STATUS=$RUN_WITH_TIMEOUT_STATUS
     OSASCRIPT_OUTPUT="$RUN_WITH_TIMEOUT_OUTPUT"
+    play_sound_now
   fi
 
-  play_sound
+  if [ "$TERMINAL_NOTIFIER_STATUS" = "0" ] && [ -z "$AFPLAY_OUTPUT" ]; then
+    prepare_sound_status
+  fi
   set -e
 fi
 

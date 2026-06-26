@@ -37,7 +37,7 @@ Codex hook 触发时，会把事件 JSON 通过 stdin 传给命令脚本。Codex
 
 备用通道是 `osascript display notification`。它在部分 macOS 通知权限配置下可能只返回成功但不显示弹窗，而且没有点击跳转能力，所以只有在 `terminal-notifier` 找不到或无法派发时才使用。`osascript` 通过脚本内的短超时执行，默认 3 秒，由 `CODEX_NOTIFIER_CHANNEL_TIMEOUT_SECONDS` 控制。
 
-声音由 `afplay` 后台播放。`terminal-notifier -sound` 只支持系统声音名，不能直接播放任意 mp3，因此自定义声音必须用 `afplay`。
+声音由 `afplay` 播放。`terminal-notifier -sound` 只支持系统声音名，不能直接播放任意 mp3，因此自定义声音必须用 `afplay`。主通道可用时，`afplay` 会在同一个后台 worker 里等待 `terminal-notifier` 完成派发后再启动，避免声音早于通知条出现。
 
 ## 点击跳转
 

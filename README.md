@@ -45,7 +45,7 @@ cd agent-notification
 - 通知副标题包含项目名和 session 前缀。
 - 通知正文优先显示 session 任务摘要（从 transcript 提取最后一条用户消息）。
 - 点击通知会尽量跳回来源应用（VS Code/iTerm2/Warp/Codex）。
-- 默认播放 bundled 的 `sounds/default.mp3`，可自定义或关闭。
+- 默认播放 bundled 的 `sounds/default.mp3`，可自定义或关闭；声音会跟随主通知通道，避免早于通知条出现。
 
 ## 点击跳转
 
@@ -138,6 +138,7 @@ afplay_status=0
 ```text
 terminal_notifier_status=0
 terminal_notifier_output=dispatched pid=12345 watchdog=30s
+afplay_output=queued after terminal-notifier
 ```
 
 不弹窗、不出声的 dry-run 测试：
