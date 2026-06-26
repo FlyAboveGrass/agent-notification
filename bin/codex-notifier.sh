@@ -1,14 +1,31 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+SCRIPT_PATH="$0"
+while [ -L "$SCRIPT_PATH" ]; do
+  SCRIPT_DIR="$(cd -P "$(dirname "$SCRIPT_PATH")" && pwd)"
+  SCRIPT_TARGET="$(readlink "$SCRIPT_PATH")"
+  case "$SCRIPT_TARGET" in
+    /*) SCRIPT_PATH="$SCRIPT_TARGET" ;;
+    *) SCRIPT_PATH="$SCRIPT_DIR/$SCRIPT_TARGET" ;;
+  esac
+done
+SCRIPT_DIR="$(cd -P "$(dirname "$SCRIPT_PATH")" && pwd)"
 LOG_FILE="${CODEX_NOTIFIER_LOG:-$HOME/.codex/codex-notifier.log}"
-DEFAULT_SOUND="$SCRIPT_DIR/../sounds/default.mp3"
-SOUND_FILE="${CODEX_NOTIFIER_SOUND:-$DEFAULT_SOUND}"
+DEFAULT_SOUND="$SCRIPT_DIR/sounds/default.mp3"
+LEGACY_SOUND="$SCRIPT_DIR/../sounds/default.mp3"
+if [ -n "${CODEX_NOTIFIER_SOUND:-}" ]; then
+  SOUND_FILE="$CODEX_NOTIFIER_SOUND"
+elif [ -f "$DEFAULT_SOUND" ]; then
+  SOUND_FILE="$DEFAULT_SOUND"
+else
+  SOUND_FILE="$LEGACY_SOUND"
+fi
 TERMINAL_NOTIFIER="${CODEX_NOTIFIER_TERMINAL_NOTIFIER:-}"
 SENDER_BUNDLE="${CODEX_NOTIFIER_SENDER_BUNDLE:-com.openai.codex}"
 ICON_PATH="${CODEX_NOTIFIER_ICON:-}"
 CHANNEL_TIMEOUT_SECONDS="${CODEX_NOTIFIER_CHANNEL_TIMEOUT_SECONDS:-3}"
+TERMINAL_NOTIFIER_WATCHDOG_SECONDS="${CODEX_NOTIFIER_TERMINAL_NOTIFIER_WATCHDOG_SECONDS:-30}"
 INPUT="$(cat)"
 NOW="$(date '+%Y-%m-%d %H:%M:%S')"
 
@@ -18,6 +35,9 @@ esac
 if [ "$CHANNEL_TIMEOUT_SECONDS" -lt 1 ]; then
   CHANNEL_TIMEOUT_SECONDS=1
 fi
+case "$TERMINAL_NOTIFIER_WATCHDOG_SECONDS" in
+  ''|*[!0-9]*) TERMINAL_NOTIFIER_WATCHDOG_SECONDS=30 ;;
+esac
 
 find_terminal_notifier() {
   if [ -n "$TERMINAL_NOTIFIER" ] && [ -x "$TERMINAL_NOTIFIER" ]; then
@@ -120,6 +140,54 @@ run_with_timeout() {
     RUN_WITH_TIMEOUT_OUTPUT="${RUN_WITH_TIMEOUT_OUTPUT}command timed out after ${timeout_seconds}s"
   fi
   rm -f "$output_file"
+}
+
+DISPATCH_DETACHED_PID=""
+dispatch_detached_with_watchdog() {
+  local watchdog_seconds="$1"
+  shift
+
+  DISPATCH_DETACHED_PID="$(/usr/bin/ruby -e '
+    watchdog_seconds = Integer(ARGV.shift)
+    command = ARGV
+    pid = Process.spawn(*command, out: "/dev/null", err: "/dev/null", pgroup: true)
+
+    if watchdog_seconds > 0
+      Process.spawn(
+        "/bin/sh",
+        "-c",
+        "sleep \"$1\"; kill -TERM -\"$2\" 2>/dev/null; sleep 0.2; kill -KILL -\"$2\" 2>/dev/null",
+        "codex-notifier-watchdog",
+        watchdog_seconds.to_s,
+        pid.to_s,
+        out: "/dev/null",
+        err: "/dev/null"
+      )
+    end
+
+    print pid
+  ' "$watchdog_seconds" "$@" 2>/dev/null)"
+}
+
+play_sound() {
+  AFPLAY_STATUS=127
+  AFPLAY_OUTPUT=""
+
+  if [ "${SOUND_FILE:-}" = "none" ]; then
+    AFPLAY_STATUS=0
+    AFPLAY_OUTPUT="disabled"
+    return
+  fi
+
+  if [ ! -f "${SOUND_FILE:-}" ]; then
+    AFPLAY_STATUS=66
+    AFPLAY_OUTPUT="sound file not found"
+    return
+  fi
+
+  /usr/bin/afplay "$SOUND_FILE" >/dev/null 2>&1 &
+  AFPLAY_STATUS=0
+  AFPLAY_OUTPUT="dispatched pid=$!"
 }
 
 parse_payload() {
@@ -239,27 +307,28 @@ else
     if [ -n "$ICON_PATH" ] && [ -f "$ICON_PATH" ]; then
       NOTIFIER_ARGS+=(-appIcon "file://$ICON_PATH")
     fi
-    run_with_timeout "$CHANNEL_TIMEOUT_SECONDS" "$NOTIFIER_BIN" "${NOTIFIER_ARGS[@]}"
-    TERMINAL_NOTIFIER_STATUS=$RUN_WITH_TIMEOUT_STATUS
-    TERMINAL_NOTIFIER_OUTPUT="$RUN_WITH_TIMEOUT_OUTPUT"
+    if dispatch_detached_with_watchdog "$TERMINAL_NOTIFIER_WATCHDOG_SECONDS" "$NOTIFIER_BIN" "${NOTIFIER_ARGS[@]}"; then
+      TERMINAL_NOTIFIER_STATUS=0
+      TERMINAL_NOTIFIER_OUTPUT="dispatched pid=$DISPATCH_DETACHED_PID watchdog=${TERMINAL_NOTIFIER_WATCHDOG_SECONDS}s"
+    else
+      TERMINAL_NOTIFIER_STATUS=$?
+      TERMINAL_NOTIFIER_OUTPUT="dispatch failed"
+    fi
   fi
 
-  run_with_timeout "$CHANNEL_TIMEOUT_SECONDS" /usr/bin/osascript \
-    -e 'on run argv' \
-    -e 'display notification (item 1 of argv) with title (item 2 of argv) subtitle (item 3 of argv)' \
-    -e 'end run' \
-    "$MESSAGE" "$TITLE" "$SUBTITLE"
-  OSASCRIPT_STATUS=$RUN_WITH_TIMEOUT_STATUS
-  OSASCRIPT_OUTPUT="$RUN_WITH_TIMEOUT_OUTPUT"
-
-  AFPLAY_STATUS=127
-  AFPLAY_OUTPUT=""
-  if [ "${SOUND_FILE:-}" != "none" ] && [ -f "$SOUND_FILE" ]; then
-    AFPLAY_OUTPUT="$(/usr/bin/afplay "$SOUND_FILE" & 2>&1)"
-    AFPLAY_STATUS=$?
-  elif [ "${SOUND_FILE:-}" = "none" ]; then
-    AFPLAY_STATUS=0
+  OSASCRIPT_STATUS=127
+  OSASCRIPT_OUTPUT="skipped because terminal-notifier was dispatched"
+  if [ "$TERMINAL_NOTIFIER_STATUS" != "0" ]; then
+    run_with_timeout "$CHANNEL_TIMEOUT_SECONDS" /usr/bin/osascript \
+      -e 'on run argv' \
+      -e 'display notification (item 1 of argv) with title (item 2 of argv) subtitle (item 3 of argv)' \
+      -e 'end run' \
+      "$MESSAGE" "$TITLE" "$SUBTITLE"
+    OSASCRIPT_STATUS=$RUN_WITH_TIMEOUT_STATUS
+    OSASCRIPT_OUTPUT="$RUN_WITH_TIMEOUT_OUTPUT"
   fi
+
+  play_sound
   set -e
 fi
 
@@ -272,6 +341,7 @@ fi
   printf 'message=%s\n' "$MESSAGE"
   printf 'target_bundle=%s\n' "$TARGET_BUNDLE"
   printf 'channel_timeout_seconds=%s\n' "$CHANNEL_TIMEOUT_SECONDS"
+  printf 'terminal_notifier_watchdog_seconds=%s\n' "$TERMINAL_NOTIFIER_WATCHDOG_SECONDS"
   printf 'terminal_notifier=%s\n' "$NOTIFIER_BIN"
   printf 'terminal_notifier_status=%s\n' "$TERMINAL_NOTIFIER_STATUS"
   if [ -n "$TERMINAL_NOTIFIER_OUTPUT" ]; then

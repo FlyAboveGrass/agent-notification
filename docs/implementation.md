@@ -33,11 +33,11 @@ Codex hook 触发时，会把事件 JSON 通过 stdin 传给命令脚本。Codex
 
 其中 `-activate` 用于点击通知后激活目标应用。
 
-备用通道是 `osascript display notification`。它在部分 macOS 通知权限配置下可能只返回成功但不显示弹窗，所以只作为兜底。
+主通道会后台派发 `terminal-notifier`，并用 `CODEX_NOTIFIER_TERMINAL_NOTIFIER_WATCHDOG_SECONDS` 控制 watchdog，默认 30 秒。这样 `terminal-notifier` 卡住时不会阻塞 Codex hook，同时保留 `-activate` 的点击跳转能力。
 
-`terminal-notifier` 和 `osascript` 都通过脚本内的短超时执行，默认 3 秒，由 `CODEX_NOTIFIER_CHANNEL_TIMEOUT_SECONDS` 控制。这样通知通道卡住时，hook 脚本会记录 `status=124` 并继续返回，避免超过 `~/.codex/hooks.json` 里的 hook timeout。
+备用通道是 `osascript display notification`。它在部分 macOS 通知权限配置下可能只返回成功但不显示弹窗，而且没有点击跳转能力，所以只有在 `terminal-notifier` 找不到或无法派发时才使用。`osascript` 通过脚本内的短超时执行，默认 3 秒，由 `CODEX_NOTIFIER_CHANNEL_TIMEOUT_SECONDS` 控制。
 
-声音由 `afplay` 播放。`terminal-notifier -sound` 只支持系统声音名，不能直接播放任意 mp3，因此自定义声音必须用 `afplay`。
+声音由 `afplay` 后台播放。`terminal-notifier -sound` 只支持系统声音名，不能直接播放任意 mp3，因此自定义声音必须用 `afplay`。
 
 ## 点击跳转
 
@@ -102,6 +102,7 @@ curl -fsSL https://raw.githubusercontent.com/FlyAboveGrass/agent-notification/ma
 - 通知标题、正文
 - 点击目标 bundle
 - 通知通道内部超时秒数
+- `terminal-notifier` watchdog 秒数
 - `terminal-notifier` 状态
 - `osascript` 状态
 - 声音文件和 `afplay` 状态

@@ -66,6 +66,8 @@ cd agent-notification
 | Terminal | `com.apple.Terminal` |
 | Codex App | `com.openai.codex` |
 
+点击跳转由 `terminal-notifier -activate` 提供。`osascript` 兜底通知没有点击跳转能力，所以只有找不到或无法派发 `terminal-notifier` 时才使用。
+
 ## 自定义
 
 临时覆盖点击目标：
@@ -104,6 +106,12 @@ CODEX_NOTIFIER_LOG=/tmp/codex-notifier.log ~/.codex/hooks/codex-stop-notify.sh
 CODEX_NOTIFIER_CHANNEL_TIMEOUT_SECONDS=2 ~/.codex/hooks/codex-stop-notify.sh
 ```
 
+自定义 `terminal-notifier` 后台进程 watchdog，默认 30 秒：
+
+```sh
+CODEX_NOTIFIER_TERMINAL_NOTIFIER_WATCHDOG_SECONDS=20 ~/.codex/hooks/codex-stop-notify.sh
+```
+
 ## 验证
 
 手动触发测试：
@@ -125,11 +133,11 @@ terminal_notifier_status=0
 afplay_status=0
 ```
 
-如果 `terminal-notifier` 卡住，日志里会看到：
+`terminal-notifier` 会后台派发，所以正常日志会看到：
 
 ```text
-terminal_notifier_status=124
-terminal_notifier_output=command timed out after 3s
+terminal_notifier_status=0
+terminal_notifier_output=dispatched pid=12345 watchdog=30s
 ```
 
 不弹窗、不出声的 dry-run 测试：
