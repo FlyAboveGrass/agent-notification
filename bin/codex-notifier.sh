@@ -8,8 +8,16 @@ SOUND_FILE="${CODEX_NOTIFIER_SOUND:-$DEFAULT_SOUND}"
 TERMINAL_NOTIFIER="${CODEX_NOTIFIER_TERMINAL_NOTIFIER:-}"
 SENDER_BUNDLE="${CODEX_NOTIFIER_SENDER_BUNDLE:-com.openai.codex}"
 ICON_PATH="${CODEX_NOTIFIER_ICON:-}"
+CHANNEL_TIMEOUT_SECONDS="${CODEX_NOTIFIER_CHANNEL_TIMEOUT_SECONDS:-3}"
 INPUT="$(cat)"
 NOW="$(date '+%Y-%m-%d %H:%M:%S')"
+
+case "$CHANNEL_TIMEOUT_SECONDS" in
+  ''|*[!0-9]*) CHANNEL_TIMEOUT_SECONDS=3 ;;
+esac
+if [ "$CHANNEL_TIMEOUT_SECONDS" -lt 1 ]; then
+  CHANNEL_TIMEOUT_SECONDS=1
+fi
 
 find_terminal_notifier() {
   if [ -n "$TERMINAL_NOTIFIER" ] && [ -x "$TERMINAL_NOTIFIER" ]; then
@@ -65,6 +73,53 @@ detect_target_bundle() {
 json_field() {
   local field="$1"
   printf '%s' "$PARSED_JSON" | /usr/bin/ruby -rjson -e "data = JSON.parse(STDIN.read); puts(data.fetch('$field', '').to_s)" 2>/dev/null || true
+}
+
+RUN_WITH_TIMEOUT_STATUS=0
+RUN_WITH_TIMEOUT_OUTPUT=""
+run_with_timeout() {
+  local timeout_seconds="$1"
+  shift
+
+  local output_file
+  output_file="$(mktemp "${TMPDIR:-/tmp}/codex-notifier.XXXXXX" 2>/dev/null || printf '%s/codex-notifier.%s.%s' "${TMPDIR:-/tmp}" "$$" "$RANDOM")"
+
+  /usr/bin/ruby -rtimeout -e '
+    timeout_seconds = Integer(ARGV.shift)
+    output_file = ARGV.shift
+    command = ARGV
+    pid = Process.spawn(*command, out: output_file, err: [:child, :out])
+
+    begin
+      Timeout.timeout(timeout_seconds) { Process.wait(pid) }
+      status = $?
+      exit(status.exitstatus || 1)
+    rescue Timeout::Error
+      begin
+        Process.kill("TERM", pid)
+      rescue Errno::ESRCH
+      end
+      sleep 0.2
+      begin
+        Process.kill("KILL", pid)
+      rescue Errno::ESRCH
+      end
+      begin
+        Process.wait(pid)
+      rescue Errno::ECHILD
+      end
+      exit 124
+    end
+  ' "$timeout_seconds" "$output_file" "$@"
+  RUN_WITH_TIMEOUT_STATUS=$?
+  RUN_WITH_TIMEOUT_OUTPUT="$(cat "$output_file" 2>/dev/null || true)"
+  if [ "$RUN_WITH_TIMEOUT_STATUS" = "124" ]; then
+    if [ -n "$RUN_WITH_TIMEOUT_OUTPUT" ]; then
+      RUN_WITH_TIMEOUT_OUTPUT="$RUN_WITH_TIMEOUT_OUTPUT; "
+    fi
+    RUN_WITH_TIMEOUT_OUTPUT="${RUN_WITH_TIMEOUT_OUTPUT}command timed out after ${timeout_seconds}s"
+  fi
+  rm -f "$output_file"
 }
 
 parse_payload() {
@@ -184,16 +239,18 @@ else
     if [ -n "$ICON_PATH" ] && [ -f "$ICON_PATH" ]; then
       NOTIFIER_ARGS+=(-appIcon "file://$ICON_PATH")
     fi
-    TERMINAL_NOTIFIER_OUTPUT="$("$NOTIFIER_BIN" "${NOTIFIER_ARGS[@]}" 2>&1)"
-    TERMINAL_NOTIFIER_STATUS=$?
+    run_with_timeout "$CHANNEL_TIMEOUT_SECONDS" "$NOTIFIER_BIN" "${NOTIFIER_ARGS[@]}"
+    TERMINAL_NOTIFIER_STATUS=$RUN_WITH_TIMEOUT_STATUS
+    TERMINAL_NOTIFIER_OUTPUT="$RUN_WITH_TIMEOUT_OUTPUT"
   fi
 
-  OSASCRIPT_OUTPUT="$(/usr/bin/osascript \
+  run_with_timeout "$CHANNEL_TIMEOUT_SECONDS" /usr/bin/osascript \
     -e 'on run argv' \
     -e 'display notification (item 1 of argv) with title (item 2 of argv) subtitle (item 3 of argv)' \
     -e 'end run' \
-    "$MESSAGE" "$TITLE" "$SUBTITLE" 2>&1)"
-  OSASCRIPT_STATUS=$?
+    "$MESSAGE" "$TITLE" "$SUBTITLE"
+  OSASCRIPT_STATUS=$RUN_WITH_TIMEOUT_STATUS
+  OSASCRIPT_OUTPUT="$RUN_WITH_TIMEOUT_OUTPUT"
 
   AFPLAY_STATUS=127
   AFPLAY_OUTPUT=""
@@ -214,6 +271,7 @@ fi
   printf 'subtitle=%s\n' "$SUBTITLE"
   printf 'message=%s\n' "$MESSAGE"
   printf 'target_bundle=%s\n' "$TARGET_BUNDLE"
+  printf 'channel_timeout_seconds=%s\n' "$CHANNEL_TIMEOUT_SECONDS"
   printf 'terminal_notifier=%s\n' "$NOTIFIER_BIN"
   printf 'terminal_notifier_status=%s\n' "$TERMINAL_NOTIFIER_STATUS"
   if [ -n "$TERMINAL_NOTIFIER_OUTPUT" ]; then

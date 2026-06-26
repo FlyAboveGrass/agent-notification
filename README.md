@@ -98,6 +98,12 @@ CODEX_NOTIFIER_ICON=/path/to/icon.png ~/.codex/hooks/codex-stop-notify.sh
 CODEX_NOTIFIER_LOG=/tmp/codex-notifier.log ~/.codex/hooks/codex-stop-notify.sh
 ```
 
+自定义通知通道内部超时，默认 3 秒：
+
+```sh
+CODEX_NOTIFIER_CHANNEL_TIMEOUT_SECONDS=2 ~/.codex/hooks/codex-stop-notify.sh
+```
+
 ## 验证
 
 手动触发测试：
@@ -117,6 +123,13 @@ tail -40 ~/.codex/codex-notifier.log
 ```text
 terminal_notifier_status=0
 afplay_status=0
+```
+
+如果 `terminal-notifier` 卡住，日志里会看到：
+
+```text
+terminal_notifier_status=124
+terminal_notifier_output=command timed out after 3s
 ```
 
 不弹窗、不出声的 dry-run 测试：
