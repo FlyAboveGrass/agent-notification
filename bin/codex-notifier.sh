@@ -27,6 +27,7 @@ SENDER_BUNDLE="${CODEX_NOTIFIER_SENDER_BUNDLE:-com.openai.codex}"
 ICON_PATH="${CODEX_NOTIFIER_ICON:-}"
 CHANNEL_TIMEOUT_SECONDS="${CODEX_NOTIFIER_CHANNEL_TIMEOUT_SECONDS:-3}"
 TERMINAL_NOTIFIER_WATCHDOG_SECONDS="${CODEX_NOTIFIER_TERMINAL_NOTIFIER_WATCHDOG_SECONDS:-30}"
+SOUND_DELAY_SECONDS="${CODEX_NOTIFIER_SOUND_DELAY_SECONDS:-1}"
 INPUT="$(cat)"
 NOW="$(date '+%Y-%m-%d %H:%M:%S')"
 
@@ -38,6 +39,9 @@ if [ "$CHANNEL_TIMEOUT_SECONDS" -lt 1 ]; then
 fi
 case "$TERMINAL_NOTIFIER_WATCHDOG_SECONDS" in
   ''|*[!0-9]*) TERMINAL_NOTIFIER_WATCHDOG_SECONDS=30 ;;
+esac
+case "$SOUND_DELAY_SECONDS" in
+  ''|*[!0-9]*) SOUND_DELAY_SECONDS=1 ;;
 esac
 
 find_terminal_notifier() {
@@ -144,53 +148,51 @@ run_with_timeout() {
 }
 
 DISPATCH_DETACHED_PID=""
-dispatch_notifier_with_sound() {
+dispatch_notifier_with_scheduled_sound() {
   local watchdog_seconds="$1"
   local sound_file="$2"
+  local sound_delay_seconds="$3"
+  shift
   shift
   shift
 
-  DISPATCH_DETACHED_PID="$(/usr/bin/ruby -rtimeout -e '
-    watchdog_seconds = Integer(ARGV.shift)
+  DISPATCH_DETACHED_PID="$(/usr/bin/ruby -e '
+    watchdog_seconds = ARGV.shift
     sound_file = ARGV.shift
+    sound_delay_seconds = ARGV.shift
     command = ARGV
+    notifier_pid = Process.spawn(*command, out: "/dev/null", err: "/dev/null", pgroup: true)
 
-    worker = fork do
-      notifier_pid = Process.spawn(*command, out: "/dev/null", err: "/dev/null", pgroup: true)
-      completed = false
-
-      begin
-        if watchdog_seconds > 0
-          Timeout.timeout(watchdog_seconds) { Process.wait(notifier_pid) }
-        else
-          Process.wait(notifier_pid)
-        end
-        completed = true
-      rescue Timeout::Error
-        begin
-          Process.kill("TERM", -notifier_pid)
-        rescue Errno::ESRCH, Errno::EPERM
-        end
-        sleep 0.2
-        begin
-          Process.kill("KILL", -notifier_pid)
-        rescue Errno::ESRCH, Errno::EPERM
-        end
-        begin
-          Process.wait(notifier_pid)
-        rescue Errno::ECHILD
-        end
-      end
-
-      if completed && sound_file != "none" && File.file?(sound_file)
-        afplay_bin = ENV.fetch("CODEX_NOTIFIER_AFPLAY", "/usr/bin/afplay")
-        Process.spawn(afplay_bin, sound_file, out: "/dev/null", err: "/dev/null")
-      end
+    if sound_file != "none" && File.file?(sound_file)
+      afplay_bin = ENV.fetch("CODEX_NOTIFIER_AFPLAY", "/usr/bin/afplay")
+      Process.spawn(
+        "/bin/sh",
+        "-c",
+        "sleep \"$1\"; \"$2\" \"$3\" >/dev/null 2>&1",
+        "codex-notifier-sound",
+        sound_delay_seconds,
+        afplay_bin,
+        sound_file,
+        out: "/dev/null",
+        err: "/dev/null"
+      )
     end
 
-    Process.detach(worker)
-    print worker
-  ' "$watchdog_seconds" "$sound_file" "$@" 2>/dev/null)"
+    if Integer(watchdog_seconds) > 0
+      Process.spawn(
+        "/bin/sh",
+        "-c",
+        "sleep \"$1\"; kill -TERM -\"$2\" 2>/dev/null; sleep 0.2; kill -KILL -\"$2\" 2>/dev/null",
+        "codex-notifier-watchdog",
+        watchdog_seconds,
+        notifier_pid.to_s,
+        out: "/dev/null",
+        err: "/dev/null"
+      )
+    end
+
+    print notifier_pid
+  ' "$watchdog_seconds" "$sound_file" "$sound_delay_seconds" "$@" 2>/dev/null)"
 }
 
 prepare_sound_status() {
@@ -210,7 +212,7 @@ prepare_sound_status() {
   fi
 
   AFPLAY_STATUS=0
-  AFPLAY_OUTPUT="queued after terminal-notifier"
+  AFPLAY_OUTPUT="scheduled after terminal-notifier delay=${SOUND_DELAY_SECONDS}s"
 }
 
 play_sound_now() {
@@ -339,7 +341,7 @@ else
       NOTIFIER_ARGS+=(-appIcon "file://$ICON_PATH")
     fi
     prepare_sound_status
-    if dispatch_notifier_with_sound "$TERMINAL_NOTIFIER_WATCHDOG_SECONDS" "$SOUND_FILE" "$NOTIFIER_BIN" "${NOTIFIER_ARGS[@]}"; then
+    if dispatch_notifier_with_scheduled_sound "$TERMINAL_NOTIFIER_WATCHDOG_SECONDS" "$SOUND_FILE" "$SOUND_DELAY_SECONDS" "$NOTIFIER_BIN" "${NOTIFIER_ARGS[@]}"; then
       TERMINAL_NOTIFIER_STATUS=0
       TERMINAL_NOTIFIER_OUTPUT="dispatched pid=$DISPATCH_DETACHED_PID watchdog=${TERMINAL_NOTIFIER_WATCHDOG_SECONDS}s"
     else
@@ -377,6 +379,7 @@ fi
   printf 'target_bundle=%s\n' "$TARGET_BUNDLE"
   printf 'channel_timeout_seconds=%s\n' "$CHANNEL_TIMEOUT_SECONDS"
   printf 'terminal_notifier_watchdog_seconds=%s\n' "$TERMINAL_NOTIFIER_WATCHDOG_SECONDS"
+  printf 'sound_delay_seconds=%s\n' "$SOUND_DELAY_SECONDS"
   printf 'terminal_notifier=%s\n' "$NOTIFIER_BIN"
   printf 'terminal_notifier_status=%s\n' "$TERMINAL_NOTIFIER_STATUS"
   if [ -n "$TERMINAL_NOTIFIER_OUTPUT" ]; then

@@ -45,7 +45,7 @@ cd agent-notification
 - 通知副标题包含项目名和 session 前缀。
 - 通知正文优先显示 session 任务摘要（从 transcript 提取最后一条用户消息）。
 - 点击通知会尽量跳回来源应用（VS Code/iTerm2/Warp/Codex）。
-- 默认播放 bundled 的 `sounds/default.mp3`，可自定义或关闭；声音会跟随主通知通道，避免早于通知条出现。
+- 默认播放 bundled 的 `sounds/default.mp3`，可自定义或关闭；默认在通知派发 1 秒后播放，避免明显早于通知条出现。
 
 ## 点击跳转
 
@@ -112,6 +112,12 @@ CODEX_NOTIFIER_CHANNEL_TIMEOUT_SECONDS=2 ~/.codex/hooks/codex-stop-notify.sh
 CODEX_NOTIFIER_TERMINAL_NOTIFIER_WATCHDOG_SECONDS=20 ~/.codex/hooks/codex-stop-notify.sh
 ```
 
+自定义声音延迟，默认 1 秒：
+
+```sh
+CODEX_NOTIFIER_SOUND_DELAY_SECONDS=1 ~/.codex/hooks/codex-stop-notify.sh
+```
+
 ## 验证
 
 手动触发测试：
@@ -138,7 +144,8 @@ afplay_status=0
 ```text
 terminal_notifier_status=0
 terminal_notifier_output=dispatched pid=12345 watchdog=30s
-afplay_output=queued after terminal-notifier
+sound_delay_seconds=1
+afplay_output=scheduled after terminal-notifier delay=1s
 ```
 
 不弹窗、不出声的 dry-run 测试：
