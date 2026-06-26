@@ -50,10 +50,29 @@ Codex hook 触发时，会把事件 JSON 通过 stdin 传给命令脚本。Codex
 
 ## 安装策略
 
+推荐安装命令是：
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/FlyAboveGrass/agent-notification/main/install.sh | bash
+```
+
+`install.sh` 支持两种运行方式：
+
+1. 在仓库目录里执行 `./install.sh` 时，直接复制本地 `bin/codex-notifier.sh`、`sounds/default.mp3` 和 `uninstall.sh`。
+2. 通过 `curl | bash` 执行时，脚本没有本地仓库上下文，会从 `AGENT_NOTIFICATION_BASE_URL` 下载运行所需文件。默认地址是 `https://raw.githubusercontent.com/FlyAboveGrass/agent-notification/main`。
+
+这样用户不需要 clone 整个仓库，也不需要保留源码目录。需要固定版本或使用镜像时，可以覆盖 `AGENT_NOTIFICATION_BASE_URL`。
+
 安装脚本把真实脚本放到：
 
 ```text
 ~/.codex/hooks/codex-notifier/codex-notifier.sh
+```
+
+同时把卸载脚本放到：
+
+```text
+~/.codex/hooks/codex-notifier/uninstall.sh
 ```
 
 同时创建稳定命令路径：

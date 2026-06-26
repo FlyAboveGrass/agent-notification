@@ -5,20 +5,37 @@ Codex Notifier 是一个 macOS Codex hook 通知包，用来在后台 Codex sess
 ## 安装
 
 ```sh
-git clone https://github.com/FlyAboveGrass/agent-notification.git
-cd agent-notification
-./install.sh
+curl -fsSL https://raw.githubusercontent.com/FlyAboveGrass/agent-notification/main/install.sh | bash
 ```
 
 安装脚本会自动完成这些操作：
 
+- 从 GitHub raw 下载运行所需文件，不需要 clone 整个仓库
 - 复制通知脚本和默认声音到 `~/.codex/hooks/codex-notifier/`
+- 安装卸载脚本到 `~/.codex/hooks/codex-notifier/uninstall.sh`
 - 创建稳定 hook 命令路径 `~/.codex/hooks/codex-stop-notify.sh`
 - 合并 `Stop` 和 `PermissionRequest` 到 `~/.codex/hooks.json`
 - 备份原 `hooks.json`
 - 发送一条安装测试通知
 
 如果 Codex 提示 hook 需要 review，在 Codex 里输入 `/hooks`，信任 user-level 的 `Stop` 和 `PermissionRequest` hook。
+
+固定到特定版本或使用镜像：
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/FlyAboveGrass/agent-notification/main/install.sh \
+  | AGENT_NOTIFICATION_BASE_URL=https://raw.githubusercontent.com/FlyAboveGrass/agent-notification/v0.1.0 bash
+```
+
+把 `v0.1.0` 换成实际发布的 tag；如果使用镜像，`AGENT_NOTIFICATION_BASE_URL` 指向镜像里的仓库根目录即可。
+
+本地开发安装：
+
+```sh
+git clone https://github.com/FlyAboveGrass/agent-notification.git
+cd agent-notification
+./install.sh
+```
 
 ## 功能
 
@@ -110,10 +127,10 @@ CODEX_NOTIFIER_DRY_RUN=1 printf '{"hook_event_name":"Stop","session_id":"manual-
 
 ## 卸载
 
-从 agent-notification 仓库目录执行：
+执行安装到 Codex hooks 目录里的卸载脚本：
 
 ```sh
-./uninstall.sh
+~/.codex/hooks/codex-notifier/uninstall.sh
 ```
 
 卸载脚本会从 `~/.codex/hooks.json` 移除 Codex Notifier hook，并删除安装目录。
